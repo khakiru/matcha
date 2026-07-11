@@ -59,6 +59,11 @@ let db = null;
 let cloudReady = false;
 let cloudLoaded = false;
 
+const defaultSupabaseConfig = {
+  url: "https://hxhntsxrqxwrydwttupx.supabase.co",
+  anonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJIUzI1NiIsInJlZiI6Imh4aG50c3hycXh3cnlkd3R0dXB4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM3NDk3MTUsImV4cCI6MjA5OTMyNTcxNX0.0XV48CZCCKzfjBPKUT-mxBYNLHG8Fnpg2GsAZMbdG7A"
+};
+
 const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
 
 const els = {
@@ -135,6 +140,10 @@ async function loadSupabaseConfig() {
     if (apiConfig.url && apiConfig.anonKey) return apiConfig;
   } catch (error) {
     console.warn("Supabase config API could not be loaded.", error);
+  }
+
+  if (defaultSupabaseConfig.url && defaultSupabaseConfig.anonKey) {
+    return normalizeSupabaseConfig(defaultSupabaseConfig, "built-in config");
   }
 
   return normalizeSupabaseConfig(localConfig, "missing config");
