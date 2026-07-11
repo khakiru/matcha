@@ -137,6 +137,11 @@ button {
   font-size: 1.7rem;
 }
 
+.migration-button {
+  margin-top: 4px;
+  width: 100%;
+}
+
 .main {
   min-width: 0;
   padding: 24px;

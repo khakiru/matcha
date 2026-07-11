@@ -49,12 +49,15 @@ let activeCategory = "All";
 let selectedProduct = null;
 let selectedOptions = {};
 let cart = [];
-let orders = loadJSON(STORAGE_KEY, []);
-let products = loadJSON(PRODUCTS_KEY, defaultProducts);
+const localProductSnapshot = loadJSON(PRODUCTS_KEY, []);
+const localOrderSnapshot = loadJSON(STORAGE_KEY, []);
+let orders = localOrderSnapshot;
+let products = localProductSnapshot.length ? localProductSnapshot.map(normalizeLocalProduct) : defaultProducts;
 let selectedDate = dateKey(new Date());
 let reportPeriod = "daily";
 let db = null;
 let cloudReady = false;
+let cloudLoaded = false;
 
 const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
 
@@ -102,6 +105,7 @@ const els = {
   shiftTotal: document.querySelector("#shift-total"),
   shiftCount: document.querySelector("#shift-count"),
   databaseStatus: document.querySelector("#database-status"),
+  migrateData: document.querySelector("#migrate-data"),
   currentTime: document.querySelector("#current-time"),
   summaryDate: document.querySelector("#summary-date"),
   summaryDayLabel: document.querySelector("#summary-day-label"),
@@ -142,6 +146,16 @@ function loadJSON(key, fallback) {
   } catch {
     return structuredClone(fallback);
   }
+}
+
+function normalizeLocalProduct(product) {
+  return {
+    id: product.id,
+    name: product.name,
+    category: product.category,
+    price: Number(product.price),
+    photo: product.photo || product.photo_url || ""
+  };
 }
 
 function saveState() {
@@ -208,16 +222,31 @@ async function loadCloudData() {
     return;
   }
 
+  cloudLoaded = true;
+
   if (productRows.length) {
     products = productRows.map(normalizeProduct);
+  } else if (localProductSnapshot.length) {
+    products = localProductSnapshot.map(normalizeLocalProduct);
+    els.databaseStatus.textContent = "Database: migration needed";
+    els.migrateData.hidden = false;
   } else {
     products = [];
     for (const product of defaultProducts) {
       products.push(await upsertCloudProduct(product));
     }
   }
-  orders = orderRows.map(normalizeOrder);
+  orders = orderRows.length ? orderRows.map(normalizeOrder) : localOrderSnapshot;
   saveState();
+  updateMigrationButton();
+}
+
+function hasLocalMigrationData() {
+  return cloudReady && (localProductSnapshot.length > 0 || localOrderSnapshot.length > 0);
+}
+
+function updateMigrationButton() {
+  els.migrateData.hidden = !hasLocalMigrationData();
 }
 
 function dataUrlToBlob(dataUrl) {
@@ -283,7 +312,7 @@ async function saveCloudOrder(order) {
 
   const rows = order.items.map((item) => ({
     order_id: order.id,
-    product_id: item.productId,
+    product_id: products.some((product) => product.id === item.productId) ? item.productId : null,
     name: item.name,
     quantity: item.qty,
     unit_price: linePrice(item),
@@ -292,6 +321,50 @@ async function saveCloudOrder(order) {
   }));
   const { error: itemsError } = await db.from("order_items").insert(rows);
   if (itemsError) throw itemsError;
+}
+
+async function cloudOrderExists(orderId) {
+  if (!cloudReady) return false;
+  const { data, error } = await db.from("orders").select("id").eq("id", orderId).maybeSingle();
+  if (error) throw error;
+  return Boolean(data);
+}
+
+async function migrateLocalData() {
+  if (!cloudReady) {
+    window.alert("Supabase is not connected yet. Check config.js or Vercel environment variables.");
+    return;
+  }
+
+  els.migrateData.disabled = true;
+  els.migrateData.textContent = "Migrating...";
+
+  try {
+    const migratedProducts = [];
+    for (const product of localProductSnapshot.map(normalizeLocalProduct)) {
+      migratedProducts.push(await upsertCloudProduct(product));
+    }
+
+    let migratedOrders = 0;
+    for (const order of localOrderSnapshot) {
+      const exists = await cloudOrderExists(order.id);
+      if (!exists) {
+        await saveCloudOrder(order);
+        migratedOrders += 1;
+      }
+    }
+
+    await loadCloudData();
+    els.databaseStatus.textContent = "Database: migration complete";
+    els.migrateData.textContent = "Migrated";
+    window.alert(`Migration complete. Products synced: ${migratedProducts.length}. Orders synced: ${migratedOrders}.`);
+  } catch (error) {
+    console.error(error);
+    els.databaseStatus.textContent = "Database: migration error";
+    els.migrateData.disabled = false;
+    els.migrateData.textContent = "Retry Migration";
+    window.alert(`Migration failed: ${error.message}`);
+  }
 }
 
 function dateKey(date) {
@@ -876,6 +949,7 @@ els.clearCart.addEventListener("click", () => {
 els.discountSelect.addEventListener("change", renderCart);
 els.checkoutButton.addEventListener("click", checkout);
 els.addProductButton.addEventListener("click", () => openProductDialog());
+els.migrateData.addEventListener("click", migrateLocalData);
 
 els.productAdminList.addEventListener("click", (event) => {
   const edit = event.target.closest("[data-edit-product]");
@@ -947,6 +1021,7 @@ setInterval(() => {
 async function startApp() {
   await initDatabase();
   await loadCloudData();
+  if (!cloudLoaded) updateMigrationButton();
   renderAll();
 }
 
