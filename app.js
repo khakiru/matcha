@@ -101,6 +101,7 @@ const els = {
   removeProductPhoto: document.querySelector("#remove-product-photo"),
   shiftTotal: document.querySelector("#shift-total"),
   shiftCount: document.querySelector("#shift-count"),
+  databaseStatus: document.querySelector("#database-status"),
   currentTime: document.querySelector("#current-time"),
   summaryDate: document.querySelector("#summary-date"),
   summaryDayLabel: document.querySelector("#summary-day-label"),
@@ -117,15 +118,22 @@ let currentProductPhoto = "";
 
 async function loadSupabaseConfig() {
   const localConfig = window.MATCHA_SUPABASE || {};
-  if (localConfig.url && localConfig.anonKey) return localConfig;
+  if (localConfig.url && localConfig.anonKey) return normalizeSupabaseConfig(localConfig);
 
   try {
     const response = await fetch("/api/config");
     if (!response.ok) return localConfig;
-    return await response.json();
+    return normalizeSupabaseConfig(await response.json());
   } catch {
     return localConfig;
   }
+}
+
+function normalizeSupabaseConfig(config) {
+  return {
+    url: (config.url || "").replace(/\/rest\/v1\/?$/, "").replace(/\/$/, ""),
+    anonKey: config.anonKey || ""
+  };
 }
 
 function loadJSON(key, fallback) {
@@ -145,9 +153,13 @@ async function initDatabase() {
   const config = await loadSupabaseConfig();
   const hasConfig = Boolean(config.url && config.anonKey);
   const hasClient = Boolean(window.supabase?.createClient);
-  if (!hasConfig || !hasClient) return;
+  if (!hasConfig || !hasClient) {
+    els.databaseStatus.textContent = "Database: local mode";
+    return;
+  }
   db = window.supabase.createClient(config.url, config.anonKey);
   cloudReady = true;
+  els.databaseStatus.textContent = "Database: Supabase";
 }
 
 function normalizeProduct(row) {
@@ -191,7 +203,8 @@ async function loadCloudData() {
 
   if (productError || orderError) {
     console.error(productError || orderError);
-    window.alert("Supabase is configured, but data could not load. Check your SQL setup and Supabase keys.");
+    els.databaseStatus.textContent = "Database: setup error";
+    window.alert(`Supabase data could not load: ${(productError || orderError).message}`);
     return;
   }
 
@@ -564,7 +577,7 @@ async function saveProduct() {
     savedProduct = await upsertCloudProduct(product);
   } catch (error) {
     console.error(error);
-    window.alert("Product could not be saved to Supabase. It was kept on this device only.");
+    window.alert(`Product could not be saved to Supabase: ${error.message}`);
   }
 
   const index = products.findIndex((item) => item.id === savedProduct.id);
@@ -587,7 +600,7 @@ async function removeProduct(productId) {
     await deleteCloudProduct(productId);
   } catch (error) {
     console.error(error);
-    window.alert("Product could not be removed from Supabase. It was removed on this device only.");
+    window.alert(`Product could not be removed from Supabase: ${error.message}`);
   }
   products = products.filter((item) => item.id !== productId);
   cart = cart.filter((item) => item.productId !== productId);
@@ -714,7 +727,7 @@ async function checkout() {
     await saveCloudOrder(order);
   } catch (error) {
     console.error(error);
-    window.alert("Order could not be saved to Supabase. It was kept on this device only.");
+    window.alert(`Order could not be saved to Supabase: ${error.message}`);
   }
 
   orders.unshift(order);
