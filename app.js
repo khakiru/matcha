@@ -122,21 +122,29 @@ let currentProductPhoto = "";
 
 async function loadSupabaseConfig() {
   const localConfig = window.MATCHA_SUPABASE || {};
-  if (localConfig.url && localConfig.anonKey) return normalizeSupabaseConfig(localConfig);
+  if (localConfig.url && localConfig.anonKey) {
+    return normalizeSupabaseConfig(localConfig, "local config");
+  }
 
   try {
     const response = await fetch("/api/config");
-    if (!response.ok) return localConfig;
-    return normalizeSupabaseConfig(await response.json());
-  } catch {
-    return localConfig;
+    if (!response.ok) {
+      return normalizeSupabaseConfig(localConfig, "missing config");
+    }
+    const apiConfig = normalizeSupabaseConfig(await response.json(), "Vercel env");
+    if (apiConfig.url && apiConfig.anonKey) return apiConfig;
+  } catch (error) {
+    console.warn("Supabase config API could not be loaded.", error);
   }
+
+  return normalizeSupabaseConfig(localConfig, "missing config");
 }
 
-function normalizeSupabaseConfig(config) {
+function normalizeSupabaseConfig(config, source) {
   return {
     url: (config.url || "").replace(/\/rest\/v1\/?$/, "").replace(/\/$/, ""),
-    anonKey: config.anonKey || ""
+    anonKey: config.anonKey || "",
+    source
   };
 }
 
@@ -167,13 +175,19 @@ async function initDatabase() {
   const config = await loadSupabaseConfig();
   const hasConfig = Boolean(config.url && config.anonKey);
   const hasClient = Boolean(window.supabase?.createClient);
-  if (!hasConfig || !hasClient) {
-    els.databaseStatus.textContent = "Database: local mode";
+  if (!hasClient) {
+    els.databaseStatus.textContent = "Database: library not loaded";
+    console.warn("Supabase browser library is not loaded. Check internet access or the Supabase CDN script in index.html.");
+    return;
+  }
+  if (!hasConfig) {
+    els.databaseStatus.textContent = "Database: missing config";
+    console.warn("Supabase config is missing. Add config.js locally or SUPABASE_URL and SUPABASE_ANON_KEY in Vercel.");
     return;
   }
   db = window.supabase.createClient(config.url, config.anonKey);
   cloudReady = true;
-  els.databaseStatus.textContent = "Database: Supabase";
+  els.databaseStatus.textContent = `Database: Supabase (${config.source})`;
 }
 
 function normalizeProduct(row) {

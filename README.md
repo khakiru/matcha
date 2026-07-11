@@ -33,6 +33,24 @@ Without Supabase config, data is stored in the browser with `localStorage`. With
 
 Product photos upload to the public `product-photos` storage bucket created by the SQL file.
 
+## Database Status Help
+
+The sidebar shows the current database connection:
+
+- `Database: Supabase (local config)` means local `config.js` is working.
+- `Database: Supabase (Vercel env)` means Vercel environment variables are working.
+- `Database: missing config` means the app cannot find Supabase keys.
+- `Database: library not loaded` means the Supabase browser script did not load.
+
+If Vercel shows `Database: missing config`, open the Vercel project named `matcha`, go to **Settings > Environment Variables**, and add:
+
+- `SUPABASE_URL`
+- `SUPABASE_ANON_KEY`
+
+After adding or changing environment variables, redeploy the Vercel project. Local `config.js` is ignored by Git, so it is not uploaded to Vercel.
+
+If local testing shows `Database: library not loaded`, check that the device has internet access and that the Supabase CDN script in `index.html` can load.
+
 ## Migration
 
 If you used the POS before Supabase was connected, open the app after configuring Supabase and click **Migrate Local Data** in the sidebar. This copies local products and orders into Supabase and skips orders that already exist in the cloud.
