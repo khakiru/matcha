@@ -1,4 +1,3 @@
-const TAX_RATE = 0.0825;
 const STORAGE_KEY = "matcha-pos-orders";
 const PRODUCTS_KEY = "matcha-pos-products";
 const SHOP_TIME_ZONE = "Asia/Phnom_Penh";
@@ -77,7 +76,6 @@ const els = {
   clearCart: document.querySelector("#clear-cart"),
   subtotal: document.querySelector("#subtotal"),
   discount: document.querySelector("#discount"),
-  tax: document.querySelector("#tax"),
   total: document.querySelector("#total"),
   checkoutButton: document.querySelector("#checkout-button"),
   discountSelect: document.querySelector("#discount-select"),
@@ -697,9 +695,8 @@ function cartTotals() {
   const subtotal = cart.reduce((sum, item) => sum + linePrice(item) * item.qty, 0);
   const discountRate = Number(els.discountSelect.value);
   const discount = subtotal * discountRate;
-  const taxable = Math.max(subtotal - discount, 0);
-  const tax = taxable * TAX_RATE;
-  const total = taxable + tax;
+  const total = Math.max(subtotal - discount, 0);
+  const tax = 0;
   return { subtotal, discount, tax, total };
 }
 
@@ -964,7 +961,6 @@ function renderCart() {
   els.cartStatus.textContent = itemCount ? `${itemCount} item${itemCount === 1 ? "" : "s"}` : "No items yet";
   els.subtotal.textContent = money.format(totals.subtotal);
   els.discount.textContent = `-${money.format(totals.discount)}`;
-  els.tax.textContent = money.format(totals.tax);
   els.total.textContent = money.format(totals.total);
   els.checkoutButton.textContent = `Charge ${money.format(totals.total)}`;
   els.checkoutButton.disabled = !cart.length;
@@ -1009,7 +1005,6 @@ function showReceipt(order) {
     `).join("")}
     <div class="receipt-line"><span>Subtotal</span><strong>${money.format(order.totals.subtotal)}</strong></div>
     <div class="receipt-line"><span>Discount</span><strong>-${money.format(order.totals.discount)}</strong></div>
-    <div class="receipt-line"><span>Tax</span><strong>${money.format(order.totals.tax)}</strong></div>
     <div class="receipt-line"><span>Total</span><strong>${money.format(order.totals.total)}</strong></div>
   `;
   els.receiptDialog.showModal();
