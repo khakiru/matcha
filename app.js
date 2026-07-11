@@ -419,7 +419,7 @@ async function loadCloudData() {
       products.push(await upsertCloudProduct(product));
     }
   }
-  orders = orderRows.length ? orderRows.map(normalizeOrder) : localOrderSnapshot;
+  orders = orderRows.map(normalizeOrder);
   saveState();
   updateMigrationButton();
 }
