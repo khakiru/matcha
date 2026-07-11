@@ -40,7 +40,7 @@
             </div>
             <label class="search">
               <span>Search</span>
-              <input id="product-search" type="search" placeholder="Find a drink or snack">
+              <input id="product-search" type="search" placeholder="Find a product">
             </label>
           </header>
 
@@ -223,16 +223,14 @@
             <img id="product-photo-preview" alt="Product preview">
             <button class="icon-button" id="remove-product-photo" type="button">Remove Photo</button>
           </div>
-          <label class="wide-field">
-            Description
-            <input id="product-description" required maxlength="120" placeholder="Cold shaken and creamy">
-          </label>
         </div>
 
         <button class="checkout-button" id="save-product-button" value="default" type="submit">Save Product</button>
       </form>
     </dialog>
 
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="config.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

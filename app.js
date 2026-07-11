@@ -5,18 +5,18 @@ const SHOP_TIME_ZONE = "Asia/Phnom_Penh";
 const FALLBACK_PHOTO = "https://images.unsplash.com/photo-1515823064-d6e0c04616a7?auto=format&fit=crop&w=800&q=80";
 
 const defaultProducts = [
-  { id: "ceremonial-latte", name: "Ceremonial Matcha Latte", category: "Matcha", price: 5.75, description: "Stone-ground matcha with milk", photo: FALLBACK_PHOTO },
-  { id: "iced-matcha", name: "Iced Matcha Latte", category: "Matcha", price: 5.95, description: "Cold shaken and creamy", photo: FALLBACK_PHOTO },
-  { id: "strawberry-matcha", name: "Strawberry Matcha", category: "Specials", price: 6.75, description: "House strawberry puree", photo: FALLBACK_PHOTO },
-  { id: "mango-matcha", name: "Mango Cloud Matcha", category: "Specials", price: 6.95, description: "Mango, matcha, soft foam", photo: FALLBACK_PHOTO },
-  { id: "hojicha-latte", name: "Hojicha Latte", category: "Tea", price: 5.5, description: "Roasted green tea latte", photo: FALLBACK_PHOTO },
-  { id: "genmaicha", name: "Genmaicha", category: "Tea", price: 4.25, description: "Toasted rice green tea", photo: FALLBACK_PHOTO },
-  { id: "matcha-lemonade", name: "Matcha Lemonade", category: "Cold Bar", price: 5.25, description: "Bright lemon with matcha float", photo: FALLBACK_PHOTO },
-  { id: "sparkling-yuzu", name: "Sparkling Yuzu", category: "Cold Bar", price: 4.95, description: "Citrus soda over ice", photo: FALLBACK_PHOTO },
-  { id: "mochi", name: "Matcha Mochi", category: "Snacks", price: 3.25, description: "Soft rice cake dessert", photo: FALLBACK_PHOTO },
-  { id: "cookie", name: "White Choc Matcha Cookie", category: "Snacks", price: 3.75, description: "Baked in-house", photo: FALLBACK_PHOTO },
-  { id: "cake", name: "Matcha Basque Cake", category: "Snacks", price: 6.25, description: "Creamy cheesecake slice", photo: FALLBACK_PHOTO },
-  { id: "set", name: "Latte + Snack Set", category: "Combos", price: 8.95, description: "Any latte with daily snack", photo: FALLBACK_PHOTO }
+  { id: "ceremonial-latte", name: "Ceremonial Matcha Latte", category: "Matcha", price: 5.75, photo: FALLBACK_PHOTO },
+  { id: "iced-matcha", name: "Iced Matcha Latte", category: "Matcha", price: 5.95, photo: FALLBACK_PHOTO },
+  { id: "strawberry-matcha", name: "Strawberry Matcha", category: "Specials", price: 6.75, photo: FALLBACK_PHOTO },
+  { id: "mango-matcha", name: "Mango Cloud Matcha", category: "Specials", price: 6.95, photo: FALLBACK_PHOTO },
+  { id: "hojicha-latte", name: "Hojicha Latte", category: "Tea", price: 5.5, photo: FALLBACK_PHOTO },
+  { id: "genmaicha", name: "Genmaicha", category: "Tea", price: 4.25, photo: FALLBACK_PHOTO },
+  { id: "matcha-lemonade", name: "Matcha Lemonade", category: "Cold Bar", price: 5.25, photo: FALLBACK_PHOTO },
+  { id: "sparkling-yuzu", name: "Sparkling Yuzu", category: "Cold Bar", price: 4.95, photo: FALLBACK_PHOTO },
+  { id: "mochi", name: "Matcha Mochi", category: "Snacks", price: 3.25, photo: FALLBACK_PHOTO },
+  { id: "cookie", name: "White Choc Matcha Cookie", category: "Snacks", price: 3.75, photo: FALLBACK_PHOTO },
+  { id: "cake", name: "Matcha Basque Cake", category: "Snacks", price: 6.25, photo: FALLBACK_PHOTO },
+  { id: "set", name: "Latte + Snack Set", category: "Combos", price: 8.95, photo: FALLBACK_PHOTO }
 ];
 
 const modifiers = {
@@ -53,6 +53,8 @@ let orders = loadJSON(STORAGE_KEY, []);
 let products = loadJSON(PRODUCTS_KEY, defaultProducts);
 let selectedDate = dateKey(new Date());
 let reportPeriod = "daily";
+let db = null;
+let cloudReady = false;
 
 const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
 
@@ -97,7 +99,6 @@ const els = {
   productPhotoFile: document.querySelector("#product-photo-file"),
   productPhotoPreview: document.querySelector("#product-photo-preview"),
   removeProductPhoto: document.querySelector("#remove-product-photo"),
-  productDescription: document.querySelector("#product-description"),
   shiftTotal: document.querySelector("#shift-total"),
   shiftCount: document.querySelector("#shift-count"),
   currentTime: document.querySelector("#current-time"),
@@ -114,6 +115,19 @@ const els = {
 
 let currentProductPhoto = "";
 
+async function loadSupabaseConfig() {
+  const localConfig = window.MATCHA_SUPABASE || {};
+  if (localConfig.url && localConfig.anonKey) return localConfig;
+
+  try {
+    const response = await fetch("/api/config");
+    if (!response.ok) return localConfig;
+    return await response.json();
+  } catch {
+    return localConfig;
+  }
+}
+
 function loadJSON(key, fallback) {
   try {
     return JSON.parse(localStorage.getItem(key)) || structuredClone(fallback);
@@ -125,6 +139,146 @@ function loadJSON(key, fallback) {
 function saveState() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(orders));
   localStorage.setItem(PRODUCTS_KEY, JSON.stringify(products));
+}
+
+async function initDatabase() {
+  const config = await loadSupabaseConfig();
+  const hasConfig = Boolean(config.url && config.anonKey);
+  const hasClient = Boolean(window.supabase?.createClient);
+  if (!hasConfig || !hasClient) return;
+  db = window.supabase.createClient(config.url, config.anonKey);
+  cloudReady = true;
+}
+
+function normalizeProduct(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    category: row.category,
+    price: Number(row.price),
+    photo: row.photo_url || ""
+  };
+}
+
+function normalizeOrder(row) {
+  return {
+    id: row.id,
+    createdAt: row.created_at,
+    payment: row.payment_method,
+    totals: {
+      subtotal: Number(row.subtotal),
+      discount: Number(row.discount),
+      tax: Number(row.tax),
+      total: Number(row.total)
+    },
+    items: (row.order_items || []).map((item) => ({
+      productId: item.product_id,
+      name: item.name,
+      basePrice: Number(item.unit_price),
+      options: item.modifiers || { size: [], milk: [], sweetness: [], toppings: [] },
+      qty: Number(item.quantity)
+    }))
+  };
+}
+
+async function loadCloudData() {
+  if (!cloudReady) return;
+
+  const [{ data: productRows, error: productError }, { data: orderRows, error: orderError }] = await Promise.all([
+    db.from("products").select("*").order("created_at", { ascending: true }),
+    db.from("orders").select("*, order_items(*)").order("created_at", { ascending: false })
+  ]);
+
+  if (productError || orderError) {
+    console.error(productError || orderError);
+    window.alert("Supabase is configured, but data could not load. Check your SQL setup and Supabase keys.");
+    return;
+  }
+
+  if (productRows.length) {
+    products = productRows.map(normalizeProduct);
+  } else {
+    products = [];
+    for (const product of defaultProducts) {
+      products.push(await upsertCloudProduct(product));
+    }
+  }
+  orders = orderRows.map(normalizeOrder);
+  saveState();
+}
+
+function dataUrlToBlob(dataUrl) {
+  const [meta, content] = dataUrl.split(",");
+  const mime = meta.match(/data:(.*?);base64/)?.[1] || "image/jpeg";
+  const binary = atob(content);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return new Blob([bytes], { type: mime });
+}
+
+async function uploadProductPhoto(productId, photo) {
+  if (!cloudReady || !photo || !photo.startsWith("data:")) return photo;
+  const blob = dataUrlToBlob(photo);
+  const path = `${productId}-${Date.now()}.jpg`;
+  const { error } = await db.storage.from("product-photos").upload(path, blob, {
+    contentType: "image/jpeg",
+    upsert: true
+  });
+  if (error) throw error;
+  const { data } = db.storage.from("product-photos").getPublicUrl(path);
+  return data.publicUrl;
+}
+
+async function upsertCloudProduct(product) {
+  if (!cloudReady) return product;
+  const photoUrl = await uploadProductPhoto(product.id, product.photo);
+  const { data, error } = await db
+    .from("products")
+    .upsert({
+      id: product.id,
+      name: product.name,
+      category: product.category,
+      price: product.price,
+      photo_url: photoUrl || null
+    })
+    .select()
+    .single();
+  if (error) throw error;
+  return normalizeProduct(data);
+}
+
+async function deleteCloudProduct(productId) {
+  if (!cloudReady) return;
+  const { error } = await db.from("products").delete().eq("id", productId);
+  if (error) throw error;
+}
+
+async function saveCloudOrder(order) {
+  if (!cloudReady) return;
+  const { error: orderError } = await db.from("orders").insert({
+    id: order.id,
+    payment_method: order.payment,
+    subtotal: order.totals.subtotal,
+    discount: order.totals.discount,
+    tax: order.totals.tax,
+    total: order.totals.total,
+    created_at: order.createdAt
+  });
+  if (orderError) throw orderError;
+
+  const rows = order.items.map((item) => ({
+    order_id: order.id,
+    product_id: item.productId,
+    name: item.name,
+    quantity: item.qty,
+    unit_price: linePrice(item),
+    modifiers: item.options,
+    line_total: linePrice(item) * item.qty
+  }));
+  const { error: itemsError } = await db.from("order_items").insert(rows);
+  if (itemsError) throw itemsError;
 }
 
 function dateKey(date) {
@@ -341,7 +495,7 @@ function renderProducts() {
   const query = els.search.value.trim().toLowerCase();
   const visible = products.filter((product) => {
     const matchesCategory = activeCategory === "All" || product.category === activeCategory;
-    const matchesSearch = [product.name, product.description, product.category].join(" ").toLowerCase().includes(query);
+    const matchesSearch = [product.name, product.category].join(" ").toLowerCase().includes(query);
     return matchesCategory && matchesSearch;
   });
 
@@ -351,7 +505,7 @@ function renderProducts() {
         <img src="${productPhoto(product)}" alt="${product.name}" loading="lazy" onerror="this.src='${FALLBACK_PHOTO}'">
         <span class="product-card-body">
           <strong>${product.name}</strong>
-          <span>${product.description}</span>
+          <span>${product.category}</span>
           <em>${money.format(product.price)}</em>
         </span>
       </button>
@@ -367,7 +521,6 @@ function renderProductAdmin() {
         <div>
           <h3>${product.name}</h3>
           <p>${product.category} - ${money.format(product.price)}</p>
-          <small>${product.description}</small>
         </div>
         <div class="admin-actions">
           <button class="icon-button" data-edit-product="${product.id}" type="button">Edit</button>
@@ -387,7 +540,6 @@ function openProductDialog(product = null) {
   els.productPhotoFile.value = "";
   currentProductPhoto = product?.photo || "";
   updateProductPhotoPreview();
-  els.productDescription.value = product?.description || "";
   els.productDialog.showModal();
 }
 
@@ -401,29 +553,42 @@ function productFromForm() {
     name,
     category: els.productCategory.value.trim(),
     price: Math.max(Number(els.productPrice.value), 0),
-    photo: currentProductPhoto,
-    description: els.productDescription.value.trim()
+    photo: currentProductPhoto
   };
 }
 
-function saveProduct() {
+async function saveProduct() {
   const product = productFromForm();
-  const index = products.findIndex((item) => item.id === product.id);
+  let savedProduct = product;
+  try {
+    savedProduct = await upsertCloudProduct(product);
+  } catch (error) {
+    console.error(error);
+    window.alert("Product could not be saved to Supabase. It was kept on this device only.");
+  }
+
+  const index = products.findIndex((item) => item.id === savedProduct.id);
   if (index >= 0) {
-    products[index] = product;
+    products[index] = savedProduct;
   } else {
-    products.push(product);
+    products.push(savedProduct);
   }
   activeCategory = "All";
   saveState();
   renderAll();
 }
 
-function removeProduct(productId) {
+async function removeProduct(productId) {
   const product = products.find((item) => item.id === productId);
   if (!product) return;
   const confirmed = window.confirm(`Remove ${product.name} from the menu? Existing order history will stay unchanged.`);
   if (!confirmed) return;
+  try {
+    await deleteCloudProduct(productId);
+  } catch (error) {
+    console.error(error);
+    window.alert("Product could not be removed from Supabase. It was removed on this device only.");
+  }
   products = products.filter((item) => item.id !== productId);
   cart = cart.filter((item) => item.productId !== productId);
   if (activeCategory !== "All" && !products.some((item) => item.category === activeCategory)) {
@@ -534,7 +699,7 @@ function renderCart() {
   els.checkoutButton.disabled = !cart.length;
 }
 
-function checkout() {
+async function checkout() {
   if (!cart.length) return;
   const totals = cartTotals();
   const order = {
@@ -544,6 +709,13 @@ function checkout() {
     items: structuredClone(cart),
     totals
   };
+
+  try {
+    await saveCloudOrder(order);
+  } catch (error) {
+    console.error(error);
+    window.alert("Order could not be saved to Supabase. It was kept on this device only.");
+  }
 
   orders.unshift(order);
   selectedDate = dateKey(order.createdAt);
@@ -702,11 +874,11 @@ els.productAdminList.addEventListener("click", (event) => {
   if (remove) removeProduct(remove.dataset.deleteProduct);
 });
 
-els.productForm.addEventListener("submit", (event) => {
+els.productForm.addEventListener("submit", async (event) => {
   if (event.submitter?.value === "cancel") return;
   event.preventDefault();
   if (!els.productForm.reportValidity()) return;
-  saveProduct();
+  await saveProduct();
   els.productDialog.close();
 });
 
@@ -759,4 +931,10 @@ setInterval(() => {
   }) + " GMT+7";
 }, 1000);
 
-renderAll();
+async function startApp() {
+  await initDatabase();
+  await loadCloudData();
+  renderAll();
+}
+
+startApp();
