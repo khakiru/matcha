@@ -148,6 +148,173 @@ function normalizeSupabaseConfig(config, source) {
   };
 }
 
+function createDatabaseClient(config) {
+  if (window.supabase?.createClient) {
+    return {
+      client: window.supabase.createClient(config.url, config.anonKey),
+      mode: "SDK"
+    };
+  }
+
+  return {
+    client: createRestDatabaseClient(config),
+    mode: "REST"
+  };
+}
+
+function createRestDatabaseClient(config) {
+  const restUrl = `${config.url}/rest/v1`;
+  const storageUrl = `${config.url}/storage/v1`;
+  const authHeaders = {
+    apikey: config.anonKey,
+    Authorization: `Bearer ${config.anonKey}`
+  };
+
+  return {
+    from(table) {
+      return new RestQueryBuilder(restUrl, authHeaders, table);
+    },
+    storage: {
+      from(bucket) {
+        return {
+          async upload(path, blob, options = {}) {
+            const response = await fetch(`${storageUrl}/object/${bucket}/${encodeStoragePath(path)}`, {
+              method: "POST",
+              headers: {
+                ...authHeaders,
+                "Content-Type": options.contentType || blob.type || "application/octet-stream",
+                "x-upsert": options.upsert ? "true" : "false"
+              },
+              body: blob
+            });
+            return parseSupabaseResponse(response);
+          },
+          getPublicUrl(path) {
+            return {
+              data: {
+                publicUrl: `${storageUrl}/object/public/${bucket}/${encodeStoragePath(path)}`
+              }
+            };
+          }
+        };
+      }
+    }
+  };
+}
+
+class RestQueryBuilder {
+  constructor(restUrl, authHeaders, table) {
+    this.restUrl = restUrl;
+    this.authHeaders = authHeaders;
+    this.table = table;
+    this.method = "GET";
+    this.payload = undefined;
+    this.params = new URLSearchParams();
+    this.filters = [];
+    this.prefer = [];
+    this.resultMode = "many";
+  }
+
+  select(columns = "*") {
+    this.params.set("select", columns);
+    if (this.method !== "GET") this.prefer.push("return=representation");
+    return this;
+  }
+
+  order(column, options = {}) {
+    const direction = options.ascending === false ? "desc" : "asc";
+    this.params.set("order", `${column}.${direction}`);
+    return this;
+  }
+
+  eq(column, value) {
+    this.filters.push([column, `eq.${value}`]);
+    return this;
+  }
+
+  insert(payload) {
+    this.method = "POST";
+    this.payload = payload;
+    return this;
+  }
+
+  upsert(payload) {
+    this.method = "POST";
+    this.payload = payload;
+    this.params.set("on_conflict", "id");
+    this.prefer.push("resolution=merge-duplicates");
+    return this;
+  }
+
+  delete() {
+    this.method = "DELETE";
+    return this;
+  }
+
+  single() {
+    this.resultMode = "single";
+    return this;
+  }
+
+  maybeSingle() {
+    this.resultMode = "maybeSingle";
+    return this;
+  }
+
+  then(resolve, reject) {
+    return this.execute().then(resolve, reject);
+  }
+
+  async execute() {
+    for (const [column, value] of this.filters) {
+      this.params.set(column, value);
+    }
+
+    const headers = { ...this.authHeaders };
+    if (this.payload !== undefined) headers["Content-Type"] = "application/json";
+    if (this.prefer.length) headers.Prefer = [...new Set(this.prefer)].join(",");
+
+    const query = this.params.toString();
+    const response = await fetch(`${this.restUrl}/${this.table}${query ? `?${query}` : ""}`, {
+      method: this.method,
+      headers,
+      body: this.payload !== undefined ? JSON.stringify(this.payload) : undefined
+    });
+
+    const result = await parseSupabaseResponse(response);
+    if (result.error) return result;
+
+    if (this.resultMode === "single") {
+      return { data: Array.isArray(result.data) ? result.data[0] : result.data, error: null };
+    }
+
+    if (this.resultMode === "maybeSingle") {
+      const rows = Array.isArray(result.data) ? result.data : [];
+      return { data: rows[0] || null, error: null };
+    }
+
+    return result;
+  }
+}
+
+async function parseSupabaseResponse(response) {
+  const text = await response.text();
+  const data = text ? JSON.parse(text) : null;
+  if (!response.ok) {
+    return {
+      data: null,
+      error: {
+        message: data?.message || data?.error || response.statusText
+      }
+    };
+  }
+  return { data, error: null };
+}
+
+function encodeStoragePath(path) {
+  return path.split("/").map(encodeURIComponent).join("/");
+}
+
 function loadJSON(key, fallback) {
   try {
     return JSON.parse(localStorage.getItem(key)) || structuredClone(fallback);
@@ -174,20 +341,15 @@ function saveState() {
 async function initDatabase() {
   const config = await loadSupabaseConfig();
   const hasConfig = Boolean(config.url && config.anonKey);
-  const hasClient = Boolean(window.supabase?.createClient);
-  if (!hasClient) {
-    els.databaseStatus.textContent = "Database: library not loaded";
-    console.warn("Supabase browser library is not loaded. Check internet access or the Supabase CDN script in index.html.");
-    return;
-  }
   if (!hasConfig) {
     els.databaseStatus.textContent = "Database: missing config";
     console.warn("Supabase config is missing. Add config.js locally or SUPABASE_URL and SUPABASE_ANON_KEY in Vercel.");
     return;
   }
-  db = window.supabase.createClient(config.url, config.anonKey);
+  const database = createDatabaseClient(config);
+  db = database.client;
   cloudReady = true;
-  els.databaseStatus.textContent = `Database: Supabase (${config.source})`;
+  els.databaseStatus.textContent = `Database: Supabase (${config.source}, ${database.mode})`;
 }
 
 function normalizeProduct(row) {
@@ -226,7 +388,7 @@ async function loadCloudData() {
 
   const [{ data: productRows, error: productError }, { data: orderRows, error: orderError }] = await Promise.all([
     db.from("products").select("*").order("created_at", { ascending: true }),
-    db.from("orders").select("*, order_items(*)").order("created_at", { ascending: false })
+    db.from("orders").select("*,order_items(*)").order("created_at", { ascending: false })
   ]);
 
   if (productError || orderError) {

@@ -37,10 +37,9 @@ Product photos upload to the public `product-photos` storage bucket created by t
 
 The sidebar shows the current database connection:
 
-- `Database: Supabase (local config)` means local `config.js` is working.
-- `Database: Supabase (Vercel env)` means Vercel environment variables are working.
+- `Database: Supabase (local config, REST)` means local `config.js` is working.
+- `Database: Supabase (Vercel env, REST)` means Vercel environment variables are working.
 - `Database: missing config` means the app cannot find Supabase keys.
-- `Database: library not loaded` means the Supabase browser script did not load.
 
 If Vercel shows `Database: missing config`, open the Vercel project named `matcha`, go to **Settings > Environment Variables**, and add:
 
@@ -49,7 +48,18 @@ If Vercel shows `Database: missing config`, open the Vercel project named `match
 
 After adding or changing environment variables, redeploy the Vercel project. Local `config.js` is ignored by Git, so it is not uploaded to Vercel.
 
-If local testing shows `Database: library not loaded`, check that the device has internet access and that the Supabase CDN script in `index.html` can load.
+The app talks to Supabase through REST and Storage APIs, so it does not require the external Supabase browser library to load.
+
+## Supabase Migrations
+
+This repo includes a Supabase migration in `supabase/migrations`.
+
+Run these commands when you want to push the schema to the `matcha` Supabase project:
+
+```bash
+supabase link --project-ref hxhntsxrqxwrydwttupx
+supabase db push
+```
 
 ## Migration
 
