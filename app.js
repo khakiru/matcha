@@ -1,5 +1,6 @@
 const STORAGE_KEY = "matcha-pos-orders";
 const PRODUCTS_KEY = "matcha-pos-products";
+const MODIFIERS_KEY = "matcha-pos-modifiers";
 const SHOP_TIME_ZONE = "Asia/Phnom_Penh";
 const FALLBACK_PHOTO = "https://images.unsplash.com/photo-1515823064-d6e0c04616a7?auto=format&fit=crop&w=800&q=80";
 
@@ -18,7 +19,14 @@ const defaultProducts = [
   { id: "set", name: "Latte + Snack Set", category: "Combos", price: 8.95, photo: FALLBACK_PHOTO }
 ];
 
-const modifiers = {
+const modifierGroups = [
+  { key: "size", label: "Size", defaultIndex: 1 },
+  { key: "milk", label: "Milk", defaultIndex: 0 },
+  { key: "sweetness", label: "Sweetness", defaultIndex: 2 },
+  { key: "toppings", label: "Toppings", defaultIndex: -1 }
+];
+
+const defaultModifiers = {
   size: [
     { name: "Small", price: 0 },
     { name: "Regular", price: 0.75 },
@@ -50,6 +58,7 @@ let selectedOptions = {};
 let cart = [];
 const localProductSnapshot = loadJSON(PRODUCTS_KEY, []);
 const localOrderSnapshot = loadJSON(STORAGE_KEY, []);
+let modifiers = normalizeModifiers(loadJSON(MODIFIERS_KEY, defaultModifiers));
 let orders = localOrderSnapshot;
 let products = localProductSnapshot.length ? localProductSnapshot.map(normalizeLocalProduct) : defaultProducts;
 let selectedDate = dateKey(new Date());
@@ -118,7 +127,8 @@ const els = {
   summaryItems: document.querySelector("#summary-items"),
   summaryDayStrip: document.querySelector("#summary-day-strip"),
   periodButtons: document.querySelectorAll("[data-period]"),
-  popularList: document.querySelector("#popular-list")
+  popularList: document.querySelector("#popular-list"),
+  modifierSettings: document.querySelector("#modifier-settings")
 };
 
 let currentProductPhoto = "";
@@ -340,9 +350,25 @@ function normalizeLocalProduct(product) {
   };
 }
 
+function normalizeModifiers(value) {
+  const source = value && typeof value === "object" ? value : {};
+  return Object.fromEntries(modifierGroups.map((group) => {
+    const fallback = defaultModifiers[group.key] || [];
+    const rows = Array.isArray(source[group.key]) ? source[group.key] : fallback;
+    const normalizedRows = rows
+      .map((option) => ({
+        name: String(option.name || "").trim(),
+        price: Number(option.price) || 0
+      }))
+      .filter((option) => option.name);
+    return [group.key, normalizedRows.length ? normalizedRows : structuredClone(fallback)];
+  }));
+}
+
 function saveState() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(orders));
   localStorage.setItem(PRODUCTS_KEY, JSON.stringify(products));
+  localStorage.setItem(MODIFIERS_KEY, JSON.stringify(modifiers));
 }
 
 async function initDatabase() {
@@ -393,15 +419,21 @@ function normalizeOrder(row) {
 async function loadCloudData() {
   if (!cloudReady) return;
 
-  const [{ data: productRows, error: productError }, { data: orderRows, error: orderError }] = await Promise.all([
+  const [
+    { data: productRows, error: productError },
+    { data: orderRows, error: orderError },
+    { data: settingsRow, error: settingsError }
+  ] = await Promise.all([
     db.from("products").select("*").order("created_at", { ascending: true }),
-    db.from("orders").select("*,order_items(*)").order("created_at", { ascending: false })
+    db.from("orders").select("*,order_items(*)").order("created_at", { ascending: false }),
+    db.from("app_settings").select("*").eq("id", "modifiers").maybeSingle()
   ]);
 
-  if (productError || orderError) {
-    console.error(productError || orderError);
+  const settingsMissing = settingsError && /app_settings|schema cache|relation/i.test(settingsError.message || "");
+  if (productError || orderError || (settingsError && !settingsMissing)) {
+    console.error(productError || orderError || settingsError);
     els.databaseStatus.textContent = "Database: setup error";
-    window.alert(`Supabase data could not load: ${(productError || orderError).message}`);
+    window.alert(`Supabase data could not load: ${(productError || orderError || settingsError).message}`);
     return;
   }
 
@@ -420,6 +452,11 @@ async function loadCloudData() {
     }
   }
   orders = orderRows.map(normalizeOrder);
+  if (settingsRow?.value) {
+    modifiers = normalizeModifiers(settingsRow.value);
+  } else if (!settingsMissing) {
+    await saveCloudModifiers();
+  }
   saveState();
   updateMigrationButton();
 }
@@ -504,6 +541,16 @@ async function saveCloudOrder(order) {
   }));
   const { error: itemsError } = await db.from("order_items").insert(rows);
   if (itemsError) throw itemsError;
+}
+
+async function saveCloudModifiers() {
+  if (!cloudReady) return;
+  const { error } = await db.from("app_settings").upsert({
+    id: "modifiers",
+    value: modifiers,
+    updated_at: new Date().toISOString()
+  });
+  if (error) throw error;
 }
 
 async function cloudOrderExists(orderId) {
@@ -866,12 +913,29 @@ async function removeProduct(productId) {
   renderAll();
 }
 
+function defaultOption(group) {
+  const meta = modifierGroups.find((item) => item.key === group);
+  const options = modifiers[group] || [];
+  if (meta?.defaultIndex >= 0 && options[meta.defaultIndex]) return options[meta.defaultIndex];
+  return options[0] || { name: "Default", price: 0 };
+}
+
+function escapeHTML(value) {
+  return String(value).replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "\"": "&quot;",
+    "'": "&#039;"
+  })[char]);
+}
+
 function renderModifierDialog(product) {
   selectedProduct = product;
   selectedOptions = {
-    size: [modifiers.size[1]],
-    milk: [modifiers.milk[0]],
-    sweetness: [modifiers.sweetness[2]],
+    size: [defaultOption("size")],
+    milk: [defaultOption("milk")],
+    sweetness: [defaultOption("sweetness")],
     toppings: []
   };
 
@@ -896,6 +960,52 @@ function renderOptionGroup(group, container) {
       ${option.name}${option.price ? ` +${money.format(option.price)}` : ""}
     </button>
   `).join("");
+}
+
+function renderModifierSettings() {
+  els.modifierSettings.innerHTML = modifierGroups.map((group) => `
+    <section class="settings-panel" data-modifier-panel="${group.key}">
+      <h3>${group.label}</h3>
+      <div class="modifier-admin-list">
+        ${modifiers[group.key].map((option, index) => `
+          <div class="modifier-admin-row" data-modifier-row="${group.key}" data-index="${index}">
+            <label>
+              Name
+              <input data-modifier-field="name" value="${escapeHTML(option.name)}" maxlength="50">
+            </label>
+            <label>
+              Price
+              <input data-modifier-field="price" value="${option.price}" min="0" step="0.01" type="number">
+            </label>
+            <button class="danger-button" data-remove-modifier="${group.key}" data-index="${index}" type="button">Remove</button>
+          </div>
+        `).join("")}
+      </div>
+      <form class="modifier-add-row" data-add-modifier="${group.key}">
+        <label>
+          New ${group.label.toLowerCase()}
+          <input data-new-modifier-name maxlength="50" placeholder="${group.key === "toppings" ? "Brown Sugar Boba" : "Option name"}">
+        </label>
+        <label>
+          Price
+          <input data-new-modifier-price min="0" step="0.01" type="number" value="0">
+        </label>
+        <button class="icon-button" type="submit">Add</button>
+      </form>
+    </section>
+  `).join("");
+}
+
+async function persistModifiers() {
+  modifiers = normalizeModifiers(modifiers);
+  saveState();
+  try {
+    await saveCloudModifiers();
+  } catch (error) {
+    console.error(error);
+    window.alert(`Customization settings could not be saved to Supabase: ${error.message}`);
+  }
+  renderModifierSettings();
 }
 
 function updateAddButton() {
@@ -1058,6 +1168,7 @@ function renderAll() {
   renderCategories();
   renderProducts();
   renderProductAdmin();
+  renderModifierSettings();
   renderCart();
   renderOrders();
   renderSummary();
@@ -1139,6 +1250,45 @@ els.productAdminList.addEventListener("click", (event) => {
     if (product) openProductDialog(product);
   }
   if (remove) removeProduct(remove.dataset.deleteProduct);
+});
+
+els.modifierSettings.addEventListener("change", async (event) => {
+  const input = event.target.closest("[data-modifier-field]");
+  if (!input) return;
+  const row = input.closest("[data-modifier-row]");
+  const group = row.dataset.modifierRow;
+  const index = Number(row.dataset.index);
+  const field = input.dataset.modifierField;
+  modifiers[group][index][field] = field === "price" ? Math.max(Number(input.value), 0) : input.value.trim();
+  await persistModifiers();
+});
+
+els.modifierSettings.addEventListener("click", async (event) => {
+  const remove = event.target.closest("[data-remove-modifier]");
+  if (!remove) return;
+  const group = remove.dataset.removeModifier;
+  const index = Number(remove.dataset.index);
+  if (modifiers[group].length <= 1 && group !== "toppings") {
+    window.alert("Keep at least one option for this group.");
+    return;
+  }
+  modifiers[group].splice(index, 1);
+  await persistModifiers();
+});
+
+els.modifierSettings.addEventListener("submit", async (event) => {
+  const form = event.target.closest("[data-add-modifier]");
+  if (!form) return;
+  event.preventDefault();
+  const group = form.dataset.addModifier;
+  const nameInput = form.querySelector("[data-new-modifier-name]");
+  const priceInput = form.querySelector("[data-new-modifier-price]");
+  const name = nameInput.value.trim();
+  if (!name) return;
+  modifiers[group].push({ name, price: Math.max(Number(priceInput.value), 0) });
+  nameInput.value = "";
+  priceInput.value = "0";
+  await persistModifiers();
 });
 
 els.productForm.addEventListener("submit", async (event) => {

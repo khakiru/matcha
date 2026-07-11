@@ -6,6 +6,7 @@ A simple browser-based point-of-sale system for a matcha shop. It runs as a stat
 
 - Product catalog with categories and search
 - Product management for adding, editing, removing, and uploading product photos
+- Settings for editing sizes, milk choices, sweetness, and toppings
 - Drink customization for size, milk, sweetness, and toppings
 - Cart quantities, discounts, and payment method selection
 - Checkout receipts and completed order history

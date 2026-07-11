@@ -659,6 +659,51 @@ legend {
   margin-bottom: 16px;
 }
 
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.settings-panel {
+  display: grid;
+  gap: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.settings-panel h3 {
+  margin: 0;
+}
+
+.modifier-admin-list {
+  display: grid;
+  gap: 10px;
+}
+
+.modifier-admin-row,
+.modifier-add-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(96px, 130px) auto;
+  gap: 8px;
+  align-items: end;
+}
+
+.modifier-admin-row label,
+.modifier-add-row label {
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.modifier-admin-row input,
+.modifier-add-row input {
+  min-width: 0;
+}
+
 .metric {
   display: grid;
   gap: 8px;
@@ -875,6 +920,10 @@ legend {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .settings-grid {
+    grid-template-columns: 1fr;
+  }
+
   .admin-product-card,
   .order-card {
     grid-template-columns: minmax(0, 1fr) auto;
@@ -1015,6 +1064,11 @@ legend {
 
   .summary-grid {
     grid-template-columns: 1fr 1fr;
+  }
+
+  .modifier-admin-row,
+  .modifier-add-row {
+    grid-template-columns: 1fr;
   }
 }
 
